@@ -25,17 +25,17 @@ class Coder {
     func generateKey(passphrase: String, salt: String) throws -> Data {
         let rounds = UInt32(45_000)
         var outputBytes = Array<UInt8>(repeating: 0,
-                                       count: kCCKeySize3DES)
+                                       count: kCCKeySizeAES128)
         let status = CCKeyDerivationPBKDF(
                          CCPBKDFAlgorithm(kCCPBKDF2),
                          passphrase,
                          passphrase.utf8.count,
                          salt,
                          salt.utf8.count,
-                         CCPseudoRandomAlgorithm(kCCAlgorithm3DES),
+                         CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
                          rounds,
                          &outputBytes,
-                         kCCKeySize3DES)
+                         kCCKeySizeAES128)
         guard status == kCCSuccess else {
             throw CoderError(message: status, kind: .derrivationError)
         }
@@ -44,16 +44,16 @@ class Coder {
     }
     func encrypt(data: Data) throws -> Data {
         // Output buffer (with padding)
-        let outputLength = data.count + kCCBlockSize3DES
+        let outputLength = data.count + kCCBlockSizeAES128
         var outputBuffer = Array<UInt8>(repeating: 0,
                                         count: outputLength)
         var numBytesEncrypted = 0
         let status = CCCrypt(CCOperation(kCCEncrypt),
-                             CCAlgorithm(kCCAlgorithm3DES),
+                             CCAlgorithm(kCCAlgorithmAES),
                              CCOptions(kCCOptionPKCS7Padding),
                              Array(self.key),
-                             kCCKeySize3DES,
-                             nil,
+                             kCCKeySizeAES128,
+                             Array(iv),
                              Array(data),
                              data.count,
                              &outputBuffer,
@@ -66,6 +66,7 @@ class Coder {
         return Data(_: outputBytes)
     }
     func decrypt(data cipherData: Data) throws -> Data {
+        let iv = cipherData.prefix(kCCBlockSizeAES128)
         let cipherTextBytes = cipherData
                                .suffix(from: kCCBlockSizeAES128)
         let cipherTextLength = cipherTextBytes.count
@@ -74,11 +75,11 @@ class Coder {
                                         count: cipherTextLength)
         var numBytesDecrypted = 0
         let status = CCCrypt(CCOperation(kCCDecrypt),
-                             CCAlgorithm(kCCAlgorithm3DES),
+                             CCAlgorithm(kCCAlgorithmAES),
                              CCOptions(),
                              Array(self.key),
-                             kCCKeySize3DES,
-                             nil,
+                             kCCKeySizeAES128,
+                             Array(iv),
                              Array(cipherTextBytes),
                              cipherTextLength,
                              &outputBuffer,

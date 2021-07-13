@@ -20,7 +20,7 @@ struct Document {
         for _ in 0...15 {
             ivi.append(Int.random(in: 0..<5))
         }
-        let iv = Data(ivi.withUnsafeBufferPointer {Data(buffer: $0)})
+        let iv = Data([1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6])
         coder = Coder(iv: iv)
     }
     mutating func codeProcess(encode: Bool, passphrase: String, salt: String) throws -> Bool {
@@ -34,7 +34,7 @@ struct Document {
                 let format = ".crypted"
                 let out = try self.substring(string: self.fileUrl, sub: format)
                 self.fileUrl = String(sub[..<sub.index(sub.startIndex, offsetBy: out)])
-                self.rawdata = self.rawdata.subdata(in: 112...self.rawdata.count-1)
+                //self.rawdata = self.rawdata.subdata(in: 16...self.rawdata.count - 1)
             } else if(encode) {
                 self.fileUrl = self.fileUrl + ".crypted"
             } else {
