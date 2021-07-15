@@ -13,69 +13,80 @@ class Coder {
             case encryptionError
             case decryptionError
             case derrivationError
+            case initError
+            case saveError
         }
-        let message: CCCryptorStatus
+        let message: String
         let kind: ErrorKind
     }
     var key: Data = Data()
-    var iv: Data
-    init(iv: Data) {
-        self.iv = iv
-    }
-    func generateKey(passphrase: String, salt: String) throws -> Data {
-        let rounds = UInt32(45_000)
-        var outputBytes = Array<UInt8>(repeating: 0,
-                                       count: kCCKeySizeAES128)
-        let status = CCKeyDerivationPBKDF(
-                         CCPBKDFAlgorithm(kCCPBKDF2),
-                         passphrase,
-                         passphrase.utf8.count,
-                         salt,
-                         salt.utf8.count,
-                         CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1),
-                         rounds,
-                         &outputBytes,
-                         kCCKeySizeAES128)
-        guard status == kCCSuccess else {
-            throw CoderError(message: status, kind: .derrivationError)
+    let iv : Data
+    var rawdata: Data
+    var fileUrl: String
+    init(fileUrl: String, inputData: Data, encode: Bool, key: Data) throws {
+        self.key = key
+        self.rawdata = inputData
+        self.fileUrl = fileUrl
+        let sub = Substring(self.fileUrl)
+        var ivi: [UInt8] = []
+        for _ in 0...15 {
+            ivi.append(UInt8.random(in: 1...16))
         }
-        self.key = Data(_: outputBytes)
-        return Data(_: outputBytes)
+        iv = Data(bytes: ivi, count: ivi.count)
+        guard self.key.count != 0 else {
+            throw CoderError(message: "Internal Error", kind: .initError)
+        }
+        if(sub.contains(".crypted") && !encode) {
+            let format = ".crypted"
+            let out = self.substring(string: self.fileUrl, sub: format)
+            self.fileUrl = String(sub[..<sub.index(sub.startIndex, offsetBy: out)])
+        } else if(encode) {
+            self.fileUrl = self.fileUrl + ".crypted"
+        } else {
+            throw CoderError(message: "Internal Error", kind: .initError)
+        }
     }
-    func encrypt(data: Data) throws -> Data {
+    func saveData() throws {
+        if(!FileManager.default.fileExists(atPath: self.fileUrl)){
+            let url: URL = URL(string: self.fileUrl)!
+            try self.rawdata.write(to: url, options: .noFileProtection)
+        } else {
+            throw CoderError(message: "File already exists", kind: .saveError)
+        }
+    }
+    func encrypt() throws {
         // Output buffer (with padding)
-        let outputLength = data.count + kCCBlockSizeAES128
+        let outputLength = self.rawdata.count + kCCBlockSizeAES128
         var outputBuffer = Array<UInt8>(repeating: 0,
                                         count: outputLength)
         var numBytesEncrypted = 0
         let status = CCCrypt(CCOperation(kCCEncrypt),
-                             CCAlgorithm(kCCAlgorithmAES),
+                             CCAlgorithm(kCCAlgorithmAES128),
                              CCOptions(kCCOptionPKCS7Padding),
                              Array(self.key),
                              kCCKeySizeAES128,
                              Array(iv),
-                             Array(data),
-                             data.count,
+                             Array(self.rawdata),
+                             self.rawdata.count,
                              &outputBuffer,
                              outputLength,
                              &numBytesEncrypted)
         guard status == kCCSuccess else {
-            throw CoderError(message: status, kind: .encryptionError)
+            throw CoderError(message: status.description, kind: .encryptionError)
         }
         let outputBytes = self.iv + outputBuffer.prefix(numBytesEncrypted)
-        return Data(_: outputBytes)
+        self.rawdata = Data(_: outputBytes)
     }
-    func decrypt(data cipherData: Data) throws -> Data {
-        let iv = cipherData.prefix(kCCBlockSizeAES128)
-        let cipherTextBytes = cipherData
+    func decrypt() throws {
+        let iv = self.rawdata.prefix(kCCBlockSizeAES128)
+        let cipherTextBytes = self.rawdata
                                .suffix(from: kCCBlockSizeAES128)
         let cipherTextLength = cipherTextBytes.count
-        // Output buffer
         var outputBuffer = Array<UInt8>(repeating: 0,
                                         count: cipherTextLength)
         var numBytesDecrypted = 0
         let status = CCCrypt(CCOperation(kCCDecrypt),
-                             CCAlgorithm(kCCAlgorithmAES),
+                             CCAlgorithm(kCCAlgorithmAES128),
                              CCOptions(),
                              Array(self.key),
                              kCCKeySizeAES128,
@@ -86,10 +97,39 @@ class Coder {
                              cipherTextLength,
                              &numBytesDecrypted)
         guard status == kCCSuccess else {
-            throw CoderError(message: status, kind: .decryptionError)
+            throw CoderError(message: status.description, kind: .decryptionError)
         }
-        // Read output discarding any padding
         let outputBytes = outputBuffer.prefix(numBytesDecrypted)
-        return Data(_: outputBytes)
+        self.rawdata = Data(_: outputBytes)
+        //self.rawdata = self.rawdata.subdata(in: iv.count..<self.rawdata.count)
+    }
+    private func substring(string: String, sub: String) -> Int{
+        var i: Int = 0
+        var length: Int = 0
+        var index: Int = -1
+        while (i < string.count) {
+            length = 0
+            for ch in sub {
+                if(ch == string[string.index(string.startIndex, offsetBy: i)]) {
+                    index = (index == -1) ? i: index
+                    i+=1
+                    length+=1
+                } else {
+                    length = 0
+                    break
+                }
+                if(length == sub.count) {
+                    return index
+                }
+            }
+            index = -1
+            i+=1
+        }
+        return -1;
+    }
+}
+extension Data {
+    func subdata(in range: ClosedRange<Index>) -> Data {
+        return subdata(in: range.lowerBound ..< range.upperBound + 1)
     }
 }

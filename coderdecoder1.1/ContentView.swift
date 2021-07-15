@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
+import CommonCrypto
+var key: Key = Key(size: kCCKeySizeAES128)
 struct CheckBoxView: View {
     @Binding var checked: Bool
     @Binding var buttonLabel: String
@@ -27,10 +30,9 @@ struct CheckBoxView: View {
     }
 }
 struct ContentView: View {
-    @State private var doc: Document = Document(input: Data())
     @State private var isImporting: Bool = false
     @State private var isExporting: Bool = false
-    @State private var isLoaded:Bool = false
+    @State private var isGenerated: Bool = key.loadKeychain()
     @State var checked = false
     @State var outfile: String = ""
     @State var passphrase: String = ""
@@ -41,23 +43,27 @@ struct ContentView: View {
     var mode2: String = "Decryption"
     var body: some View {
         VStack() {
-            Text("Choose encrypt/decrypt mode")
+            Text("Choose encrypt/decrypt mode").padding(.top)
+            HStack() {
             CheckBoxView(checked: $checked, buttonLabel: $buttonLabel, text: mode1, change: mode2)
-            HStack {
-                Text("Passphrase: ")
-                TextField("Enter passphrase", text: $passphrase)
-            }
-            HStack {
-                Text("Salt Word:    ")
-                TextField("Enter salt word", text: $salt)
             }
             HStack {
                 Button(action: {
+                    key.generateKey(keySize: kCCKeySizeAES128)
+                    if(!key.saveKeychain()) {
+                        info = "Failed to save key"
+                        return
+                    }
+                    info = "Key generated and saved successfully"
+                    self.isGenerated = true
+                }, label: {
+                    Text("Generate Key")
+                })
+                Button(action: {
                     isImporting = true
-                    isExporting = false
                 }, label: {
                     Text(buttonLabel)
-                }).disabled(self.salt == "" || self.passphrase == "")
+                }).disabled(!self.isGenerated)
             }
             Text(info)
         }
@@ -69,25 +75,37 @@ struct ContentView: View {
             do {
                 guard let selectedFile: URL = try result.get().first else { self.info = "Error with file selecting"; return }
                 let input: Data = try Data(contentsOf: selectedFile)
-                self.doc.rawdata = input
-                self.doc.fileUrl = selectedFile.absoluteString
-                self.isLoaded = true
+                let code = try Coder(fileUrl: selectedFile.absoluteString, inputData: input, encode: !checked, key: key.getKey())
+                _ = (self.checked) ? try code.decrypt() : try code.encrypt()
+                try code.saveData()
                 self.info = "Code process failed"
-                let isWorking: Bool = try self.doc.codeProcess(encode: !self.checked, passphrase: self.passphrase, salt: self.salt)
-                if(isWorking) {
-                    self.info = ((self.checked) ? self.mode2 : self.mode1) + " processed successfully"
-                }
+                self.info = ((self.checked) ? self.mode2 : self.mode1) + " processed successfully"
             } catch {
                 print("Unable to read file contents")
                 print(error.localizedDescription)
                 self.info = "Error: " + error.localizedDescription
             }
-        }
-        .frame(maxWidth: 320, maxHeight: 190)
+        }.frame(maxWidth: 350, maxHeight: 110)
     }
 }
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
+    }
+}
+extension UTType {
+    static var crypted: UTType {
+        UTType(importedAs: "public.crypted")
+    }
+}
+extension View {
+    @ViewBuilder func isHidden(_ hidden: Bool, remove: Bool = false) -> some View {
+        if hidden {
+            if !remove {
+                self.hidden()
+            }
+        } else {
+            self
+        }
     }
 }
